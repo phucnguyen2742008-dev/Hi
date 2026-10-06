@@ -1,5 +1,5 @@
--- Roblox NPC Scanner & Teleport — Draggable + Toggle Version
--- Place in: StarterGui → StarterPlayerScripts (as LocalScript)
+-- Roblox NPC Scanner & Teleport System — Draggable Mobile-Friendly Version
+-- Place in: StarterGui → StarterPlayerScripts OR LocalScript in your GUI container
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -9,8 +9,9 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 -- ========== CONFIGURATION ==========
 local SCAN_KEYBIND = Enum.KeyCode.R
 local BUTTON_SIZE = UDim2.new(0, 180, 0, 50)
+local BUTTON_POSITION = UDim2.new(0.02, 0, 0.5, 0)
 local LIST_SIZE = UDim2.new(0, 200, 0, 300)
-local START_POS = UDim2.new(0.02, 0, 0.5, 0)
+local LIST_OFFSET = Vector2.new(0, 60) -- below button
 -- ====================================
 
 -- Create Screen Gui
@@ -18,122 +19,119 @@ local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "NPCScannerGui"
 ScreenGui.Parent = PlayerGui
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.ResetOnSpawn = false
 
 -- ===== DRAGGABLE CONTAINER =====
-local MainContainer = Instance.new("Frame")
-MainContainer.Name = "MainContainer"
-MainContainer.Size = UDim2.new(1, 0, 1, 0)
-MainContainer.BackgroundTransparency = 1
-MainContainer.Position = START_POS
-MainContainer.Parent = ScreenGui
+local DragContainer = Instance.new("Frame")
+DragContainer.Name = "DragContainer"
+DragContainer.Size = UDim2.new(1, 0, 1, 0) -- fills screen for easy drag detection
+DragContainer.BackgroundTransparency = 1
+DragContainer.Position = UDim2.new(0, 0, 0, 0)
+DragContainer.Parent = ScreenGui
 
--- Toggle Button (Show/Hide NPC List)
-local ToggleButton = Instance.new("TextButton")
-ToggleButton.Name = "ToggleButton"
-ToggleButton.Size = BUTTON_SIZE
-ToggleButton.Position = UDim2.new(0, 0, 0, 0)
-ToggleButton.BackgroundColor3 = Color3.fromRGB(41, 128, 185)
-ToggleButton.Text = "🔄 Scan NPCs"
-ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-ToggleButton.Font = Enum.Font.GothamBold
-ToggleButton.TextSize = 16
-ToggleButton.AutoLocalize = false
-ToggleButton.Parent = MainContainer
-
--- Drag Handle Label
-local DragHandle = Instance.new("TextLabel")
-DragHandle.Name = "DragHandle"
-DragHandle.Size = UDim2.new(0, 30, 1, 0)
-DragHandle.Position = UDim2.new(1, -30, 0, 0)
-DragHandle.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-DragHandle.Text = "⋮⋮"
-DragHandle.TextColor3 = Color3.fromRGB(200, 200, 200)
-DragHandle.Font = Enum.Font.GothamBold
-DragHandle.TextSize = 10
-DragHandle.Parent = ToggleButton
+-- Main Refresh Button
+local RefreshButton = Instance.new("TextButton")
+RefreshButton.Name = "RefreshButton"
+RefreshButton.Size = BUTTON_SIZE
+RefreshButton.Position = BUTTON_POSITION
+RefreshButton.BackgroundColor3 = Color3.fromRGB(41, 128, 185)
+RefreshButton.Text = "🔄 Scan NPCs"
+RefreshButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+RefreshButton.Font = Enum.Font.GothamBold
+RefreshButton.TextSize = 16
+RefreshButton.BorderSizePixel = 0
+RefreshButton.AutoLocalize = false
+RefreshButton.Parent = DragContainer
 
 -- NPC List Container
 local ListFrame = Instance.new("Frame")
 ListFrame.Name = "NPCListFrame"
 ListFrame.Size = LIST_SIZE
-ListFrame.Position = UDim2.new(0, 0, 1, 5)
 ListFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 ListFrame.BorderSizePixel = 1
 ListFrame.BorderColor3 = Color3.fromRGB(60, 60, 60)
 ListFrame.Visible = false
-ListFrame.ClipsDescendants = true
-ListFrame.Parent = MainContainer
+ListFrame.Parent = DragContainer
 
 local ListLayout = Instance.new("UIListLayout")
 ListLayout.Padding = UDim.new(0, 4)
 ListLayout.Parent = ListFrame
 
--- ===== DRAG FUNCTIONALITY =====
+-- ===== DRAG SYSTEM (Mobile + Mouse) =====
 local dragging = false
-local dragStart, startPos
+local dragStartPos = Vector2.zero
+local uiStartPos = Vector2.zero
 
-local function makeDraggable(frame)
-    local function update(input)
-        local delta = input.Position - dragStart
-        MainContainer.Position = UDim2.new(
-            startPos.X.Scale, startPos.X.Offset + delta.X,
-            startPos.Y.Scale, startPos.Y.Offset + delta.Y
-        )
-    end
-
-    frame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 
-        or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = MainContainer.Position
-            input.Changed:Wait()
-            dragging = false
-        end
-    end)
-
-    frame.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement 
-        or input.UserInputType == Enum.UserInputType.Touch) then
-            update(input)
-        end
-    end)
+-- Helper: Keep UI within screen bounds
+local function clampToScreen(uiPos, uiSize)
+    local screenAbs = DragContainer.AbsoluteSize
+    local pad = 10 -- keep 10px from edges
+    local x = math.max(pad, math.min(uiPos.X, screenAbs.X - uiSize.X - pad))
+    local y = math.max(pad, math.min(uiPos.Y, screenAbs.Y - uiSize.Y - pad))
+    return Vector2.new(x, y)
 end
 
--- Make both toggle button and drag handle movable
-makeDraggable(ToggleButton)
-makeDraggable(DragHandle)
+-- Start drag
+RefreshButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 
+    or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStartPos = Vector2.new(input.Position.X, input.Position.Y)
+        uiStartPos = Vector2.new(RefreshButton.AbsolutePosition.X, RefreshButton.AbsolutePosition.Y)
+    end
+end)
 
--- ===== SCAN & TELEPORT =====
+-- Update position while dragging
+UserInputService.InputChanged:Connect(function(input)
+    if not dragging then return end
+    if input.UserInputType == Enum.UserInputType.MouseMovement 
+    or input.UserInputType == Enum.UserInputType.Touch then
+        local curPos = Vector2.new(input.Position.X, input.Position.Y)
+        local delta = curPos - dragStartPos
+        local newAbsPos = clampToScreen(uiStartPos + delta, 
+            Vector2.new(RefreshButton.AbsoluteSize.X, RefreshButton.AbsoluteSize.Y))
+        
+        -- Convert absolute → relative UDim2
+        local relX = newAbsPos.X / DragContainer.AbsoluteSize.X
+        local relY = newAbsPos.Y / DragContainer.AbsoluteSize.Y
+        RefreshButton.Position = UDim2.new(relX, 0, relY, 0)
+        
+        -- Reposition list below button
+        ListFrame.Position = UDim2.new(relX + 0, LIST_OFFSET.X, relY + 0, LIST_OFFSET.Y)
+    end
+end)
+
+-- End drag
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 
+    or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+-- ===== NPC SCAN & TELEPORT =====
 local function scanNPCs()
     -- Clear old list
     for _, child in ipairs(ListFrame:GetChildren()) do
-        if child:IsA("TextButton") or child:IsA("TextLabel") then
-            child:Destroy()
-        end
+        if child:IsA("TextButton") then child:Destroy() end
     end
 
     local npcsFound = {}
 
-    -- Scan workspace
+    -- Scan entire workspace for NPCs
     for _, descendant in ipairs(workspace:GetDescendants()) do
         local humanoid = descendant:FindFirstChildOfClass("Humanoid")
-        if not humanoid then continue end
-
         local parentModel = descendant:IsA("Model") and descendant or descendant.Parent
-        if not parentModel then continue end
 
-        -- Skip players
-        if Players:GetPlayerFromCharacter(parentModel) then continue end
-
-        local npcRoot = humanoid.RootPart
-        if npcRoot then
-            table.insert(npcsFound, {
-                Name = parentModel.Name,
-                Position = npcRoot.Position,
-                Model = parentModel
-            })
+        if humanoid and parentModel and not Players:GetPlayerFromCharacter(parentModel) then
+            local npcName = parentModel.Name or "Unnamed NPC"
+            local npcRoot = humanoid.RootPart
+            if npcRoot then
+                table.insert(npcsFound, {
+                    Name = npcName,
+                    Position = npcRoot.Position,
+                    Model = parentModel
+                })
+            end
         end
     end
 
@@ -148,58 +146,45 @@ local function scanNPCs()
         InfoLabel.TextSize = 14
         InfoLabel.Parent = ListFrame
     else
-        for _, npc in ipairs(npcsFound) do
-            local TeleportBtn = Instance.new("TextButton")
-            TeleportBtn.Size = UDim2.new(1, -8, 0, 32)
-            TeleportBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
-            TeleportBtn.Text = npc.Name
-            TeleportBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            TeleportBtn.Font = Enum.Font.Gotham
-            TeleportBtn.TextSize = 12
-            TeleportBtn.AutoLocalize = false
-            TeleportBtn.Parent = ListFrame
+        for index, npc in ipairs(npcsFound) do
+            local TeleportButton = Instance.new("TextButton")
+            TeleportButton.Size = UDim2.new(1, -8, 0, 32)
+            TeleportButton.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+            TeleportButton.Text = tostring(index) .. ". " .. npc.Name
+            TeleportButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+            TeleportButton.Font = Enum.Font.Gotham
+            TeleportButton.TextSize = 12
+            TeleportButton.AutoLocalize = false
+            TeleportButton.Parent = ListFrame
 
-            TeleportBtn.MouseButton1Click:Connect(function()
-                local char = Player.Character
-                if char and char:FindFirstChild("HumanoidRootPart") then
-                    char.HumanoidRootPart.Position = npc.Position + Vector3.new(0, 2, 0)
+            TeleportButton.MouseButton1Click:Connect(function()
+                local character = Player.Character
+                if character and character:FindFirstChild("HumanoidRootPart") then
+                    character.HumanoidRootPart.Position = npc.Position + Vector3.new(0, 2, 0)
                 end
             end)
         end
     end
 
+    -- Keep list positioned below button
+    local btnRelX = RefreshButton.Position.X.Scale
+    local btnRelY = RefreshButton.Position.Y.Scale
+    ListFrame.Position = UDim2.new(btnRelX, LIST_OFFSET.X, btnRelY, LIST_OFFSET.Y)
     ListFrame.Visible = true
-    ToggleButton.Text = "✅ Found: " .. #npcsFound .. " (Tap to Close)"
+
+    RefreshButton.Text = "✅ NPCs Found: " .. #npcsFound
+    task.delay(2.5, function()
+        if RefreshButton then RefreshButton.Text = "🔄 Scan NPCs" end
+    end)
 end
 
--- Toggle open/close
-ToggleButton.MouseButton1Click:Connect(function()
-    if ListFrame.Visible then
-        ListFrame.Visible = false
-        ToggleButton.Text = "🔄 Scan NPCs"
-    else
-        scanNPCs()
-    end
-end)
+-- Connect actions
+RefreshButton.MouseButton1Click:Connect(scanNPCs)
 
--- Touch support for toggle
-ToggleButton.Tap:Connect(function()
-    if ListFrame.Visible then
-        ListFrame.Visible = false
-        ToggleButton.Text = "🔄 Scan NPCs"
-    else
-        scanNPCs()
-    end
-end)
-
--- Keyboard shortcut
-UserInputService.InputBegan:Connect(function(input)
+-- Keybind refresh
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
     if input.KeyCode == SCAN_KEYBIND then
-        if ListFrame.Visible then
-            ListFrame.Visible = false
-            ToggleButton.Text = "🔄 Scan NPCs"
-        else
-            scanNPCs()
-        end
+        scanNPCs()
     end
 end)
