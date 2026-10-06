@@ -1,0 +1,205 @@
+-- Roblox NPC Scanner & Teleport — Draggable + Toggle Version
+-- Place in: StarterGui → StarterPlayerScripts (as LocalScript)
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+
+-- ========== CONFIGURATION ==========
+local SCAN_KEYBIND = Enum.KeyCode.R
+local BUTTON_SIZE = UDim2.new(0, 180, 0, 50)
+local LIST_SIZE = UDim2.new(0, 200, 0, 300)
+local START_POS = UDim2.new(0.02, 0, 0.5, 0)
+-- ====================================
+
+-- Create Screen Gui
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "NPCScannerGui"
+ScreenGui.Parent = PlayerGui
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.ResetOnSpawn = false
+
+-- ===== DRAGGABLE CONTAINER =====
+local MainContainer = Instance.new("Frame")
+MainContainer.Name = "MainContainer"
+MainContainer.Size = UDim2.new(1, 0, 1, 0)
+MainContainer.BackgroundTransparency = 1
+MainContainer.Position = START_POS
+MainContainer.Parent = ScreenGui
+
+-- Toggle Button (Show/Hide NPC List)
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Name = "ToggleButton"
+ToggleButton.Size = BUTTON_SIZE
+ToggleButton.Position = UDim2.new(0, 0, 0, 0)
+ToggleButton.BackgroundColor3 = Color3.fromRGB(41, 128, 185)
+ToggleButton.Text = "🔄 Scan NPCs"
+ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleButton.Font = Enum.Font.GothamBold
+ToggleButton.TextSize = 16
+ToggleButton.AutoLocalize = false
+ToggleButton.Parent = MainContainer
+
+-- Drag Handle Label
+local DragHandle = Instance.new("TextLabel")
+DragHandle.Name = "DragHandle"
+DragHandle.Size = UDim2.new(0, 30, 1, 0)
+DragHandle.Position = UDim2.new(1, -30, 0, 0)
+DragHandle.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+DragHandle.Text = "⋮⋮"
+DragHandle.TextColor3 = Color3.fromRGB(200, 200, 200)
+DragHandle.Font = Enum.Font.GothamBold
+DragHandle.TextSize = 10
+DragHandle.Parent = ToggleButton
+
+-- NPC List Container
+local ListFrame = Instance.new("Frame")
+ListFrame.Name = "NPCListFrame"
+ListFrame.Size = LIST_SIZE
+ListFrame.Position = UDim2.new(0, 0, 1, 5)
+ListFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+ListFrame.BorderSizePixel = 1
+ListFrame.BorderColor3 = Color3.fromRGB(60, 60, 60)
+ListFrame.Visible = false
+ListFrame.ClipsDescendants = true
+ListFrame.Parent = MainContainer
+
+local ListLayout = Instance.new("UIListLayout")
+ListLayout.Padding = UDim.new(0, 4)
+ListLayout.Parent = ListFrame
+
+-- ===== DRAG FUNCTIONALITY =====
+local dragging = false
+local dragStart, startPos
+
+local function makeDraggable(frame)
+    local function update(input)
+        local delta = input.Position - dragStart
+        MainContainer.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+
+    frame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = MainContainer.Position
+            input.Changed:Wait()
+            dragging = false
+        end
+    end)
+
+    frame.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement 
+        or input.UserInputType == Enum.UserInputType.Touch) then
+            update(input)
+        end
+    end)
+end
+
+-- Make both toggle button and drag handle movable
+makeDraggable(ToggleButton)
+makeDraggable(DragHandle)
+
+-- ===== SCAN & TELEPORT =====
+local function scanNPCs()
+    -- Clear old list
+    for _, child in ipairs(ListFrame:GetChildren()) do
+        if child:IsA("TextButton") or child:IsA("TextLabel") then
+            child:Destroy()
+        end
+    end
+
+    local npcsFound = {}
+
+    -- Scan workspace
+    for _, descendant in ipairs(workspace:GetDescendants()) do
+        local humanoid = descendant:FindFirstChildOfClass("Humanoid")
+        if not humanoid then continue end
+
+        local parentModel = descendant:IsA("Model") and descendant or descendant.Parent
+        if not parentModel then continue end
+
+        -- Skip players
+        if Players:GetPlayerFromCharacter(parentModel) then continue end
+
+        local npcRoot = humanoid.RootPart
+        if npcRoot then
+            table.insert(npcsFound, {
+                Name = parentModel.Name,
+                Position = npcRoot.Position,
+                Model = parentModel
+            })
+        end
+    end
+
+    -- Show results
+    if #npcsFound == 0 then
+        local InfoLabel = Instance.new("TextLabel")
+        InfoLabel.Size = UDim2.new(1, -8, 0, 30)
+        InfoLabel.BackgroundTransparency = 1
+        InfoLabel.Text = "No NPCs found!"
+        InfoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+        InfoLabel.Font = Enum.Font.Gotham
+        InfoLabel.TextSize = 14
+        InfoLabel.Parent = ListFrame
+    else
+        for _, npc in ipairs(npcsFound) do
+            local TeleportBtn = Instance.new("TextButton")
+            TeleportBtn.Size = UDim2.new(1, -8, 0, 32)
+            TeleportBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+            TeleportBtn.Text = npc.Name
+            TeleportBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            TeleportBtn.Font = Enum.Font.Gotham
+            TeleportBtn.TextSize = 12
+            TeleportBtn.AutoLocalize = false
+            TeleportBtn.Parent = ListFrame
+
+            TeleportBtn.MouseButton1Click:Connect(function()
+                local char = Player.Character
+                if char and char:FindFirstChild("HumanoidRootPart") then
+                    char.HumanoidRootPart.Position = npc.Position + Vector3.new(0, 2, 0)
+                end
+            end)
+        end
+    end
+
+    ListFrame.Visible = true
+    ToggleButton.Text = "✅ Found: " .. #npcsFound .. " (Tap to Close)"
+end
+
+-- Toggle open/close
+ToggleButton.MouseButton1Click:Connect(function()
+    if ListFrame.Visible then
+        ListFrame.Visible = false
+        ToggleButton.Text = "🔄 Scan NPCs"
+    else
+        scanNPCs()
+    end
+end)
+
+-- Touch support for toggle
+ToggleButton.Tap:Connect(function()
+    if ListFrame.Visible then
+        ListFrame.Visible = false
+        ToggleButton.Text = "🔄 Scan NPCs"
+    else
+        scanNPCs()
+    end
+end)
+
+-- Keyboard shortcut
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == SCAN_KEYBIND then
+        if ListFrame.Visible then
+            ListFrame.Visible = false
+            ToggleButton.Text = "🔄 Scan NPCs"
+        else
+            scanNPCs()
+        end
+    end
+end)
